@@ -344,17 +344,16 @@ if __name__ == '__main__':
 		parser.add_argument('--train_batch_size', type=int, help='batch size of training data', default=40)
 		parser.add_argument('--test_batch_size', type=int, help='batch size of testing data', default=16)
 		parser.add_argument('--validation', type=int, default=0, help="Run validation test set")
-		parser.add_argument('--epochs', type=int, help='number of epoches', default=300)
+		parser.add_argument('--epochs', type=int, help='number of epoches', default=30)
 		parser.add_argument('--lr', type=float, help='learning rate', default=2e-4)
 		parser.add_argument('--weight_decay', type=float, help='weight decay for L2 regularization', default=1e-4)
 		#Network Settings
 		parser.add_argument('--height',type=int,default=128,help="Max feature channel size")
 		parser.add_argument('--width',type=int,default=256,help="Max feature channel size")
 
-        parser.add_argument('--block_depths', type=str, help='SWIN block depths (must be 4 numbers e.g. 1234', default=3372)
-        parser.add_argument('--deform', type=int, help='Use deform patch embedding',default = 0)
+        parser.add_argument('--block_depths', type=str, help='SWIN block depths (must be 4 numbers e.g. 1234', default=3352)
         parser.add_argument('--in_chans', type=int, help='3=just image, 6=w/ Env Map', default=3)
-        parser.add_argument('--window_size', type=int, help='Window Size', default=7)
+        parser.add_argument('--window_size', type=int, help='Window Size', default=8)
         parser.add_argument('--embed_dim', type=int, help='Number of embedding dimensions', default=96)
         parser.add_argument('--use_checkpoint', type=int, help='Training checkpoint traning', default=0)
 
