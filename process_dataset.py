@@ -73,18 +73,20 @@ def parse_arguments(args):
 def in_out_door(old_csv,new_csv):
 	old_df = pd.read_csv(old_csv)
 	img_list = old_df['filename'].tolist()
+	rot_list = old_df['rotation'].tolist()
+	flip_list = old_df['flip'].tolist()
 	#create csv file
 	with open(new_csv, 'w') as csvDataFile:
 		writer = csv.writer(csvDataFile)
-		header = ["filename","label"]
+		header = ["filename","rotation","flip","label"]
 		writer.writerow(header)
 		#cycle thorugh img_list
-		for img_file in img_list:
+		for i,img_file in enumerate(img_list):
 			if "scene" in img_file:
 				label = 1
 			else:
 				label = 0
-			writer.writerow([str(img_file),label])
+			writer.writerow([str(img_file),rot_list[i],flip_list[i],label])
 
 		#save df to csv file
 		csvDataFile.close()

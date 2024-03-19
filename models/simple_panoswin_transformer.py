@@ -769,7 +769,7 @@ class PatchEmbed(nn.Module):
 from lzx.utils import cv_show1
 
 
-@BACKBONES.register_module()
+
 class SimplePanoSwinTransformer(nn.Module, DoubleModeModule):
     def __init__(self,
                  patch_size=4,
@@ -869,9 +869,7 @@ class SimplePanoSwinTransformer(nn.Module, DoubleModeModule):
             layer_name = f'norm{i_layer}'
             self.add_module(layer_name, layer)
 
-        self.classify = nn.ModuleList()
-        self.classify.append(nn.Linear(n_classes,embed_dim*2**len(depths)))
-        self.classify.append(nn.Sigmoid())
+        self.classify = nn.Sequential(nn.Linear(self.num_features[-1]*8*16,n_classes),nn.Sigmoid())
 
         DoubleModeModule.__init__(self, pano_mode=pano_mode)
 
@@ -975,7 +973,7 @@ class SimplePanoSwinTransformer(nn.Module, DoubleModeModule):
                 out = x_out_bsC.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
         #return tuple(outs)
-        return self.classify(out)
+        return self.classify(out.view(-1,H*W*self.num_features[i]))
 
     def train(self, mode=True):
         """Convert the model into training mode while keep layers freezed."""
@@ -1034,7 +1032,7 @@ class PitchAttentionModule(BasicWindowAttention):
         """
 
         # perform panoramic rotation
-        rotated_bChw, _, rotated_uv_hwb = pano_rotate_image(x_bCHW, np_uv=np_uv, with_uv=True)
+        rotated_bChw, _ = pano_rotate_image(x_bCHW, np_uv=np_uv)#, with_uv=True)
 
         B, C, H2, W2 = x_bCHW.shape
 
@@ -1280,97 +1278,6 @@ def _test_WindowTransition():
         # print(x)
         # print(trans(x))
         print((trans(trans(bhwc), reverse=True) == bhwc).sum(), bhwc.size(), h * w)
-
-
-from fvcore.nn import FlopCountAnalysis, parameter_count_table
-
-
-def _test_flop():
-    with torch.no_grad():
-        depths = [3, 2, 1, 0]
-        pano_swin = SimplePanoSwinTransformer(
-                     patch_size=4,
-                     in_chans=3,
-                     embed_dim=96,
-                     depths=[3, 3, 7, 2][:len(depths)],
-                     num_heads=[3, 6, 12, 24][:len(depths)],
-                     window_size=7, # number of patches with a window
-                     mlp_ratio=4.,
-                     qkv_bias=True,
-                     qk_scale=None,
-                     drop_rate=0.,
-                     attn_drop_rate=0.,
-                     drop_path_rate=0.2,
-                     norm_layer=nn.LayerNorm,
-                     ape=True,
-                     patch_norm=True,
-                     out_indices=(0, 1, 2, 3)[:len(depths)],
-                     frozen_stages=-1,
-                     use_checkpoint=False
-        )
-        pano_swin.set_pano_mode(False)
-        pano_swin.eval()
-        x = torch.rand(1,3,512,1024)
-        outs = pano_swin(x)
-        print("sizes=", [o.shape for o in outs])
-        # sizes= [torch.Size([1, 96, 128, 256]), torch.Size([1, 192, 64, 128]), torch.Size([1, 384, 32, 64]), torch.Size([1, 768, 16, 32])]
-        # exit()
-
-        # xx = pano_swin(x)
-        flops = FlopCountAnalysis(pano_swin, x)
-        print(flops.total()) # 1517570712
-        # exit()
-        # pano_ratio_v = [[0,1.0,48]]
-        # flop, param = profile(pano_swin, inputs=(x, [[0,1.0,96]]))
-        # pano_swin(x)
-        # 1347606822
-        # print(param)
-        # print(flop)
-
-
-from thop import profile
-def _test_flop2():
-    with torch.no_grad():
-        depths = [3, 2, 1, 0]
-        pano_swin = SimplePanoSwinTransformer(
-                     patch_size=4,
-                     in_chans=3,
-                     embed_dim=8,
-                     depths=[3, 3, 3, 2][:len(depths)],
-                     num_heads=[1, 1, 1, 1][:len(depths)],
-                     window_size=7, # number of patches with a window
-                     mlp_ratio=4.,
-                     qkv_bias=True,
-                     qk_scale=None,
-                     drop_rate=0.,
-                     attn_drop_rate=0.,
-                     drop_path_rate=0.2,
-                     norm_layer=nn.LayerNorm,
-                     ape=True,
-                     patch_norm=True,
-                     out_indices=(0, 1, 2, 3)[:len(depths)],
-                     frozen_stages=-1,
-                     use_checkpoint=False
-        )
-        pano_swin.set_pano_mode(True)
-        pano_swin.eval()
-        x = torch.rand(1,3,512,1024)
-        outs = pano_swin(x)
-        print("sizes=", [o.shape for o in outs])
-        # sizes= [torch.Size([1, 96, 128, 256]), torch.Size([1, 192, 64, 128]), torch.Size([1, 384, 32, 64]), torch.Size([1, 768, 16, 32])]
-        # exit()
-
-        # xx = pano_swin(x)
-        flops = FlopCountAnalysis(pano_swin, x)
-        print(flops.total()) # 1517570712
-        # exit()
-        # pano_ratio_v = [[0,1.0,48]]
-        flop, param = profile(pano_swin, inputs=(x,))
-        # pano_swin(x)
-        # 1347606822
-        print(param)
-        print(flop)
-
 
 if __name__ == '__main__':
     _test()

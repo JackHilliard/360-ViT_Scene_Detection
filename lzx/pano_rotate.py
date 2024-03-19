@@ -177,13 +177,13 @@ def pano_rotate_image(bcwh, np_uv, tuvwh2xyxy_boxes=None):
     mesh_v, mesh_u = torch.meshgrid(torch.arange(H) / H - 0.5, torch.arange(W) / H - 1)
     s_uv = torch.stack([mesh_u, mesh_v], -1) * math.pi
     s_uv = einops.rearrange(s_uv, "H W C -> (H W) C")
-    rotated_uv = pano_rotate(np_uv, s_uv, reverse=False)  # rotate_f(s_uv)
+    rotated_uv = pano_rotate(np_uv, s_uv.to(np_uv.device), reverse=False)  # rotate_f(s_uv)
     xyxy_boxes = _pano_rotate_image_s_uvs(tuvwh2xyxy_boxes, [W, H], np_uv)
     eps = 5e-4
     rotated_uv[..., 0] = torch.clip(rotated_uv[..., 0] / math.pi, min=eps-1, max=1-eps)
     rotated_uv[..., 1] = torch.clip(rotated_uv[..., 1] / math.pi * 2, min=eps-1, max=1-eps)
     rotated_uv = einops.rearrange(rotated_uv, "(H W) C -> H W C", W=W)
-    out = F.grid_sample(bcwh, rotated_uv[None], mode='bilinear', padding_mode='border', align_corners=False)
+    out = F.grid_sample(bcwh, rotated_uv.unsqueeze(0).expand(B,-1,-1,-1), mode='bilinear', padding_mode='border', align_corners=False)
     return out, xyxy_boxes
 
 

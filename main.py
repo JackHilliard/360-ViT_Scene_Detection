@@ -19,18 +19,8 @@ from torchvision import transforms
 from torchvision.transforms import ToTensor, Normalize, Resize, CenterCrop
 from torchvision.transforms.functional import InterpolationMode
 #in repo
-from models.build4 import build_model
-from utils.spherical_lpips import LPIPS as SP_LPIPS
-from utils.utils import tonemapping
-from models.Discriminator_ml import MsImageDis
-from models.env_map_net import EnvModel
-from dataset import gamma_correct_torch, dataset_ldr2hdr
-from utils.loss import cosine_blur
-#metrics
-from pytorch_msssim import ssim
-from utils.metrics import PSNR, my_FID, angular_error
-
-from blip_models.blip import blip_decoder
+from models.build_model import build_model
+from dataset import dataset_sceneDetection
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -78,8 +68,6 @@ class sceneDetection():
 
 		#Optimiser
 		self.opt_gen = optim.Adam(self.gen.parameters(), lr=args.lr / 2, betas=(0, 0.9), weight_decay=args.weight_decay)
-		if self.dsc_type != "None" and args.mode < 2:
-			self.opt_dis = optim.Adam(self.dis.parameters(), lr=args.lr * 2, betas=(0, 0.9), weight_decay=args.weight_decay)
 
 
 		#Load data
@@ -112,26 +100,27 @@ class sceneDetection():
 		np.save(file,loss_graph)
 		file.close
 
-		if self.dsc_type != "None" and args.mode < 2:
-			torch.save(self.dis.state_dict(), join(self.args.save_weight_dir, 'Dis'))
-			self.dis.eval()
-
 	def setup_loss_functions(self):
 		## Define Loss functions
-		self.L2_loss = nn.MSELoss().cuda()
-		self.mae = nn.L1Loss().cuda()
-		self.BCE = nn.BCELoss().cuda()
+		if self.loss_func == "L2":
+			self.L2_loss = nn.MSELoss().cuda()
+		elif self.loss_func == "L1":
+			self.mae = nn.L1Loss().cuda()
+		elif self.loss_func == "CE":
+			self.CE = nn.CrossEntropyLoss().cuda()
+		else:
+			self.BCE = nn.BCELoss().cuda()
 
 	def calc_losses(self, pred, gt):
-		losses = np.zeros((6))
-
 		#Pixel Reconstruction Loss
 		if self.loss_func == "L1":
 			pixel_rec_loss = self.mae(pred,gt)
-		elif self.L2_loss == "L2":
+		elif self.loss_func == "L2":
 			pixel_rec_loss = self.L2_loss(pred,gt)
+		elif self.loss_func == "CE":
+			pixel_rec_loss = self.CE(pred,gt)
 		else:
-			pixel_rec_loss = self.BECLoss(pred, gt)
+			pixel_rec_loss = self.BCE(pred, gt)
 
 		pixel_rec_loss = pixel_rec_loss * self.args.PR_lw
 
@@ -182,15 +171,13 @@ class sceneDetection():
 
 	def train(self):
 		self.gen.train()
-		if self.dsc_type != "None":
-			self.dis.train()
 
 		#setup loss logs
 		tot_loss = np.zeros((self.args.epochs))
 		if self.args.validation:
 			val_loss = np.zeros((self.args.epochs))
 		if self.args.load_pretrain:
-			tot_loss[:self.gen_data.shape[1]] = self.gen_data
+			tot_loss[:self.gen_data.shape[0]] = self.gen_data
 
 		epoch = self.start_epoch
 		for epoch in range(self.start_epoch,self.epochs):
@@ -200,27 +187,21 @@ class sceneDetection():
 
 				pred_label = self.gen(image)
 
-				tot_loss[epoch] = self.calc_losses(pred_label, label)
+				tot_loss[epoch] += self.calc_losses(pred_label.squeeze(1), label)
 
 				# #write first few files to output
 				# if epoch == (self.args.epochs-1) and (batch_idx == 0):
 				# 	self.print_images('train',pred_ldr,6)
 
-			print_loss = tot_loss[:,epoch] / len(self.train_loader)
-			print(f"Epoch {epoch}/{self.args.epochs}:Loss: {print_loss[2]}")
+			print_loss = tot_loss[epoch] / len(self.train_loader)
+			print(f"Epoch {epoch}/{self.epochs}:Loss: {print_loss}")
 
 			self.save(epoch, tot_loss)
 			self.gen.train()
-			if self.dsc_type != "None":
-				self.dis.train()
-
 			#run validation set
 			if self.args.validation:
-				all_val_loss = self.validate(epoch)
-				val_loss[epoch] = all_val_loss
+				val_loss[epoch] = self.validate(epoch)
 				self.gen.train()
-				if self.dsc_type != "None":
-					self.dis.train()
 
 		self.save(epoch, tot_loss)
 		tot_loss /= len(self.train_loader)
@@ -231,15 +212,14 @@ class sceneDetection():
 
 	def validate(self,epoch=0):
 		self.gen.eval()
-		if self.dsc_type != "None":
-			self.dis.eval()
 
+		tot_loss = 0.0
 		for batch_idx, (image, label, name) in enumerate(self.validate_loader):
 
 			pred_label = self.gen(image)
 
 			##Compute losses
-			tot_loss = calc_losses(pred_label, label)
+			tot_loss += self.calc_losses(pred_label.squeeze(1), label)
 
 			# #write first few files to output
 			# if epoch == (self.args.epochs-1) and (batch_idx == 0):
@@ -254,9 +234,7 @@ class sceneDetection():
 		print("Testing...")
 		self.gen.eval()
 
-		accuracy
-
-		eve = eval_metrics()
+		accuracy = 0.0
 
 		com_total = 0
 		for batch_idx, (image, label, name) in enumerate(self.eval_loader):
@@ -267,8 +245,9 @@ class sceneDetection():
 
 				comsum = time() - t_start
 				com_total += comsum
-				acc_labels = torch.where(pred_labels < 0.5,0.0,1.0)
-				accuracy += torch.where(pred_labels==label,1.0,0.0).mean()
+				#acc_labels = torch.where(pred_labels < 0.5,0.0,1.0).squeeze(1)
+				acc_labels = pred_labels.squeeze(1) > 0.5
+				accuracy += (acc_labels==label).sum().item() / label.size(0)
 
 		accuracy /= len(self.eval_loader)
 		avg = com_total / len(self.eval_loader)
@@ -307,22 +286,6 @@ class sceneDetection():
 		avg = com_total / len(loader)
 		print(f"Average Inference Time: {avg}s")
 
-
-class eval_metrics():
-	def __init__(self):
-		self.psnr = PSNR(1).cuda()
-		self.L2_loss = nn.MSELoss()
-		self.fid = my_FID()
-		self.ang_err = angular_error()
-
-	def eval(self, gen_img, gt_img):
-		SSIM = torch.mean(ssim(gen_img, gt_img, data_range=gt_img.max()-gt_img.min(), size_average=False))
-		psnr = self.psnr(gen_img.permute((0,2,3,1)),gt_img.permute((0,2,3,1)))
-		rmse = torch.sqrt(self.L2_loss(gen_img,gt_img))
-		fid = self.fid(gen_img,gt_img)
-		ae = self.ang_err(gen_img,gt_img)
-
-		return SSIM, psnr, rmse, fid, ae	
 
 if __name__ == '__main__':
 
@@ -365,7 +328,6 @@ if __name__ == '__main__':
 							default=SAVE_WEIGHT_DIR)
 		parser.add_argument('--save_weight_dir', type=str, help='directory of saving model weights',
 							default=SAVE_WEIGHT_DIR)
-		parser.add_argument('--log_dir', type=str, help='directory of saving logs', default=SAVE_LOG_DIR)
 		parser.add_argument('--save_dir', type=str, help='directory of saving results', default=SAVE_DIR)
 		parser.add_argument('--train_data_dir', type=str, help='directory of training data', default=TRAIN_DATA_DIR)
 		parser.add_argument('--validate_data_dir', type=str, help='directory of validation data', default=TEST_DATA_DIR)
@@ -380,22 +342,22 @@ if __name__ == '__main__':
 	for arg in vars(args):
 		print(" {} : {} ".format(arg, getattr(args,arg) or ''))
 
-    config = {}
-    config['TYPE'] = args.model_type
-    config['PATCH_SIZE'] = 4
-    config['IN_CHANS'] = args.in_chans
-    config['EMBED_DIM'] = args.embed_dim
-#    config['SWIN.DEPTHS'] = [2, 2, 6, 2]	#old
-    config['DEPTHS'] = [int(args.block_depths[0]), int(args.block_depths[1]), int(args.block_depths[2]), int(args.block_depths[3])]
-    config['NUM_HEADS'] = [3, 6, 12, 24]
-    config['WINDOW_SIZE'] = args.window_size
-    config['MLP_RATIO'] = 4.
-    config['QKV_BIAS'] = True
-    config['QK_SCALE'] = None
-    config['DROP_RATE'] = 0.0
-    config['DROP_PATH_RATE'] = 0.2
-    config['PATCH_NORM'] = args.patch_norm
-    config['TRAIN.USE_CHECKPOINT'] = False
+	config = {}
+	config['TYPE'] = args.model_type
+	config['PATCH_SIZE'] = 4
+	config['IN_CHANS'] = args.in_chans
+	config['EMBED_DIM'] = args.embed_dim
+	#    config['SWIN.DEPTHS'] = [2, 2, 6, 2]	#old
+	config['DEPTHS'] = [int(args.block_depths[0]), int(args.block_depths[1]), int(args.block_depths[2]), int(args.block_depths[3])]
+	config['NUM_HEADS'] = [3, 6, 12, 24]
+	config['WINDOW_SIZE'] = args.window_size
+	config['MLP_RATIO'] = 4.
+	config['QKV_BIAS'] = True
+	config['QK_SCALE'] = None
+	config['DROP_RATE'] = 0.0
+	config['DROP_PATH_RATE'] = 0.2
+	config['PATCH_NORM'] = args.patch_norm
+	config['TRAIN.USE_CHECKPOINT'] = False
 
 
 	args.log_dir = args.path + args.log_dir + args.name +"/"
