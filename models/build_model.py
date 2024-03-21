@@ -22,7 +22,7 @@ def build_model(config):
                                      drop_path_rate=config['DROP_PATH_RATE'],
                                      ape=True,
                                      patch_norm=config['PATCH_NORM'],
-                                     out_indices=(0, 1, 2, 3),
+                                     out_indices=[i for i in range(len(config['DEPTHS']))],
                                      frozen_stages=-1,
                                      use_checkpoint=config['TRAIN.USE_CHECKPOINT'],
                                      pano_mode=True)
